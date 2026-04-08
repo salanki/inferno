@@ -8,11 +8,11 @@ use std::{
 
 use netdev::mac::MacAddr;
 
+use crate::device_info::{Channel, DeviceInfo};
 use crate::protocol::flows_control::PORT as FLOWS_CONTROL_PORT;
 use crate::protocol::mcast::INFO_REQUEST_PORT;
 use crate::protocol::proto_arc::PORT as ARC_PORT;
 use crate::protocol::proto_cmc::PORT as CMC_PORT;
-use crate::device_info::{Channel, DeviceInfo};
 
 fn create_self_info(
   app_name: &str,
@@ -25,12 +25,18 @@ fn create_self_info(
   let interfaces = netdev::get_interfaces();
   let my_ipv4 = my_ip
     .or_else(|| {
-      settings.get("BIND_IP").map(|ipstr| ipstr.parse().unwrap_or_else(|_| {
-        interfaces.iter().find(|iface| &iface.name == ipstr)
-          .expect("invalid setting BIND_IP, must contain IP address or network interface name")
-          .ipv4.get(0).expect("interface specified in BIND_IP has no IPv4 addresses")
-          .addr()
-      }))
+      settings.get("BIND_IP").map(|ipstr| {
+        ipstr.parse().unwrap_or_else(|_| {
+          interfaces
+            .iter()
+            .find(|iface| &iface.name == ipstr)
+            .expect("invalid setting BIND_IP, must contain IP address or network interface name")
+            .ipv4
+            .get(0)
+            .expect("interface specified in BIND_IP has no IPv4 addresses")
+            .addr()
+        })
+      })
     })
     .unwrap_or_else(|| match local_ip_address::local_ip().expect("unknown local IP, cannot continue") {
       IpAddr::V4(a) => a,
@@ -68,6 +74,11 @@ fn create_self_info(
     .get("SAMPLE_RATE")
     .map(|s| s.parse().expect("invalid SAMPLE_RATE, must be integer"))
     .unwrap_or(48000);
+  let bits_per_sample = settings
+    .get("BITS_PER_SAMPLE")
+    .map(|s| s.parse::<u8>().expect("invalid BITS_PER_SAMPLE, must be one of: 16, 24, 32"))
+    .unwrap_or(24);
+  assert!(matches!(bits_per_sample, 16 | 24 | 32), "invalid BITS_PER_SAMPLE, must be one of: 16, 24, 32");
 
   let mut netmask = Ipv4Addr::new(0, 0, 0, 0);
   let mut gateway = Ipv4Addr::new(0, 0, 0, 0);
@@ -112,7 +123,7 @@ fn create_self_info(
     gateway,
     mac_address,
     link_speed: speed.clamp(0, 10000).try_into().unwrap(),
-    
+
     board_name: "Inferno-AoIP".to_owned(),
     manufacturer: "Inferno-AoIP".to_owned(),
     model_name: app_name.to_owned(),
@@ -124,7 +135,7 @@ fn create_self_info(
     model_number: "_000000000000000b".to_owned(),
     rx_channels: vec![],
     tx_channels: vec![],
-    bits_per_sample: 24, // TODO make it configurable
+    bits_per_sample,
     pcm_type: 0xe,
     latency_ns,
     sample_rate,
